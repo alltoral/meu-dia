@@ -11,7 +11,7 @@
 <link rel="manifest" href="./manifest.json">
 <link rel="icon" href="./icon-192.png">
 <link rel="apple-touch-icon" href="./icon-192.png">
-<title>Meu Dia — ALLTORAL</title>
+<title>Meu Dia</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -27,6 +27,16 @@
   }
   *{box-sizing:border-box;}
   html{ -webkit-text-size-adjust:100%; }
+  .app-footer{
+    text-align:center;
+    font-size:11px;
+    letter-spacing:1px;
+    text-transform:uppercase;
+    color:var(--white);
+    opacity:0.28;
+    padding:28px 16px calc(96px + env(safe-area-inset-bottom));
+    user-select:none;
+  }
   body{
     margin:0;
     background:var(--bg-page);
@@ -486,7 +496,7 @@
 
   <div class="header">
     <div class="header-inner">
-      <span class="eyebrow">ALLTORAL · organização diária</span>
+      <span class="eyebrow">organização diária</span>
       <div class="title-row">
         <h1>Meu <span class="accent-script">Dia</span></h1>
       </div>
@@ -521,6 +531,8 @@
     </div>
     <div class="week-board" id="weekBoard"></div>
   </div>
+
+  <footer class="app-footer">Desenvolvido por All Toral</footer>
 
 </div>
 
