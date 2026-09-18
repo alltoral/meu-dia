@@ -514,7 +514,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-import { initializeFirestore, persistentLocalCache, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { initializeFirestore, persistentLocalCache, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
 // ====== COLE AQUI A CONFIGURAÇÃO DO SEU PROJETO FIREBASE ======
 // Veja o LEIA-ME.md para o passo a passo (gratuito, sem cartão de crédito).
@@ -598,12 +598,12 @@ try {
     weekLabel.textContent = fmt(dates[0]) + ' – ' + fmt(dates[6]);
   }
 
-  function addTask(dk, text){
+  function addTask(dk, text, done){
     if(!tasksByDate[dk]) tasksByDate[dk] = [];
     tasksByDate[dk].push({
       id: 't' + Date.now() + Math.random().toString(36).slice(2,6),
       text: text,
-      done: false
+      done: !!done
     });
     renderDay(dk);
     save(dk);
@@ -614,7 +614,7 @@ try {
      igual em mouse e touch — o HTML5 drag-and-drop nativo não é confiável em
      navegadores de celular. Só inicia o arrasto depois de um pequeno limiar
      de movimento, pra não disparar sozinho com um toque rápido no manípulo. */
-  function startDrag(e, handle, sourceDk, text){
+  function startDrag(e, handle, sourceDk, text, done, removeFromSource){
     if(!text) return;
     const startX = e.clientX, startY = e.clientY;
     let dragging = false;
@@ -653,7 +653,10 @@ try {
         overEl.classList.remove('drag-over');
         if(dragging){
           const targetDk = overEl.dataset.date;
-          if(targetDk && targetDk !== sourceDk) addTask(targetDk, text);
+          if(targetDk && targetDk !== sourceDk){
+            addTask(targetDk, text, done);
+            if(removeFromSource) removeFromSource();
+          }
         }
       }
     }
@@ -662,7 +665,11 @@ try {
     handle.addEventListener('pointercancel', onUp);
   }
 
-  function makeDragHandle(sourceDk, getText){
+  /* sourceDk null = veio do checklist semanal (não tem dia fixo pra sair).
+     O item some da origem só quando o arrasto termina de fato em cima de
+     outro dia — soltar fora de um dia, ou sem mover o suficiente, não
+     mexe em nada (evita perder o item com um toque acidental). */
+  function makeDragHandle(sourceDk, getText, getDone, removeFromSource){
     const handle = document.createElement('span');
     handle.className = 'task-drag-handle';
     handle.textContent = '⠿';
@@ -670,7 +677,7 @@ try {
     handle.addEventListener('pointerdown', function(e){
       e.preventDefault();
       try{ handle.setPointerCapture(e.pointerId); }catch(err){}
-      startDrag(e, handle, sourceDk, getText());
+      startDrag(e, handle, sourceDk, getText(), getDone ? getDone() : false, removeFromSource);
     });
     return handle;
   }
@@ -696,16 +703,19 @@ try {
     text.addEventListener('blur', ()=>{ task.text = text.textContent; save(dk); });
     el.appendChild(text);
 
-    el.appendChild(makeDragHandle(dk, ()=> task.text));
+    function removeThisTask(){
+      tasksByDate[dk] = (tasksByDate[dk]||[]).filter(t=>t.id!==task.id);
+      renderDay(dk);
+      save(dk);
+    }
+    el.appendChild(makeDragHandle(dk, ()=> task.text, ()=> task.done, removeThisTask));
 
     const close = document.createElement('span');
     close.className = 'task-close';
     close.textContent = '×';
     close.addEventListener('click', (e)=>{
       e.stopPropagation();
-      tasksByDate[dk] = (tasksByDate[dk]||[]).filter(t=>t.id!==task.id);
-      renderDay(dk);
-      save(dk);
+      removeThisTask();
     });
     el.appendChild(close);
 
@@ -861,16 +871,19 @@ try {
     text.addEventListener('blur', ()=>{ item.text = text.textContent; saveChecklist(); });
     el.appendChild(text);
 
-    el.appendChild(makeDragHandle(null, ()=> item.text));
+    function removeThisItem(){
+      currentChecklist = currentChecklist.filter(i=>i.id!==item.id);
+      renderChecklist();
+      saveChecklist();
+    }
+    el.appendChild(makeDragHandle(null, ()=> item.text, null, removeThisItem));
 
     const close = document.createElement('span');
     close.className = 'task-close';
     close.textContent = '×';
     close.addEventListener('click', (e)=>{
       e.stopPropagation();
-      currentChecklist = currentChecklist.filter(i=>i.id!==item.id);
-      renderChecklist();
-      saveChecklist();
+      removeThisItem();
     });
     el.appendChild(close);
 
@@ -1178,10 +1191,115 @@ try {
     return segments;
   }
 
+  /* ---------- Larot: planejamento semanal (o checklist "Essa semana") ----------
+     Gatilhos separados dos post-its por dia:
+     - "essa semana" / "o que eu tenho essa semana" (sozinho, sem itens depois)
+       → CONSULTA: descreve o que já está no checklist daquela semana.
+     - "semana que vem" / "próxima semana" (sozinho)
+       → CONSULTA do checklist da semana seguinte à de hoje.
+     - "semana que vem: item, item, item" (com itens depois)
+       → CRIA itens no checklist da semana seguinte à de hoje — pro ritual de
+         toda quinta-feira planejar a semana seguinte, mesmo sem estar
+         navegando pra lá na tela. */
+  function larotWeekRangeLabel(weekStart){
+    const dates = weekDates(weekStart);
+    const fmt = (d)=> d.getDate() + ' ' + d.toLocaleDateString('pt-BR',{month:'short'}).replace('.','');
+    return fmt(dates[0]) + ' – ' + fmt(dates[6]);
+  }
+
+  async function larotLoadChecklistForWeek(weekStart){
+    const wk = dateKey(weekStart);
+    if(wk === dateKey(currentWeekStart)) return currentChecklist;
+    if(db){
+      try{
+        const ref = doc(db, 'boards', boardCode + '_checklist_' + wk);
+        const snap = await getDoc(ref);
+        if(snap.exists()){
+          const data = snap.data();
+          if(Array.isArray(data.items)) return data.items;
+        }
+        return [];
+      }catch(err){
+        console.warn('Larot: erro ao buscar checklist da semana', err);
+      }
+    }
+    let raw = null;
+    try{ raw = localStorage.getItem(checklistLocalKey(wk)); }catch(err){}
+    if(raw){ try{ return JSON.parse(raw); }catch(err){ return []; } }
+    return [];
+  }
+
+  function larotDescribeChecklist(items, weekStart){
+    const label = larotWeekRangeLabel(weekStart);
+    if(!items || items.length === 0) return 'Nada planejado ainda pra semana de ' + label + '.';
+    const parts = items.map(function(it){ return (it.done ? '✓ ' : '') + it.text; });
+    return 'Semana de ' + label + ': ' + parts.join(' · ');
+  }
+
+  /* Grava num checklist mesmo que não seja o da semana visível na tela —
+     por isso não pode reaproveitar addChecklistItem(), que só mexe no
+     currentChecklist em memória (a semana mostrada no momento). */
+  function larotAddChecklistItemFor(wk, text){
+    if(wk === dateKey(currentWeekStart)){
+      addChecklistItem(text);
+      return;
+    }
+    const item = { id: 'c' + Date.now() + Math.random().toString(36).slice(2,6), text: text, done: false };
+    let list = [];
+    try{
+      const raw = localStorage.getItem(checklistLocalKey(wk));
+      if(raw) list = JSON.parse(raw);
+    }catch(err){}
+    list.push(item);
+    try{ localStorage.setItem(checklistLocalKey(wk), JSON.stringify(list)); }catch(err){}
+    if(db){
+      const ref = doc(db, 'boards', boardCode + '_checklist_' + wk);
+      getDoc(ref).then(function(snap){
+        let items = [];
+        if(snap.exists()){
+          const data = snap.data();
+          if(Array.isArray(data.items)) items = data.items;
+        }
+        items.push(item);
+        return setDoc(ref, { items: items, updatedAt: Date.now() });
+      }).catch(function(err){ console.warn('Larot: erro ao salvar checklist (outra semana) na nuvem', err); });
+    }
+  }
+
+  const WEEK_QUERY_NEXT_RE = /^\s*(a\s+)?(semana que vem|proxima semana|semana seguinte)\s*[?.!]*\s*$|\b(o que (eu )?tenho|resumo|planejamento|lista)\b.*\b(semana que vem|proxima semana|semana seguinte)\b/;
+  const WEEK_QUERY_THIS_RE = /^\s*essa semana\s*[?.!]*\s*$|\b(o que (eu )?tenho|resumo|planejamento|lista)\b.*\bessa semana\b/;
+  const WEEK_PLAN_TRIGGER_RE = /\b(semana que vem|proxima semana|semana seguinte)\b/;
+
   function larotHandleVoiceCommand(transcript){
     if(!transcript || !transcript.trim()) return { ok:false, message:'Não ouvi nada.' };
     const clean = transcript.replace(/^[\s,;:.!?\-–—]+/, '').replace(/[\s,;:.!?\-–—]+$/, '');
     if(!clean) return { ok:false, message:'Não ouvi nada.' };
+    const lower = larotNormalize(clean);
+
+    if(WEEK_QUERY_NEXT_RE.test(lower)){
+      const weekStart = addDays(startOfWeek(new Date()), 7);
+      return larotLoadChecklistForWeek(weekStart).then(function(items){
+        return { ok:true, message: larotDescribeChecklist(items, weekStart), speak:true };
+      });
+    }
+    if(WEEK_QUERY_THIS_RE.test(lower)){
+      const weekStart = startOfWeek(new Date());
+      return larotLoadChecklistForWeek(weekStart).then(function(items){
+        return { ok:true, message: larotDescribeChecklist(items, weekStart), speak:true };
+      });
+    }
+
+    const planMatch = lower.match(WEEK_PLAN_TRIGGER_RE);
+    if(planMatch){
+      const rest = clean.slice(planMatch.index + planMatch[0].length).replace(/^[\s:,\-]+/, '');
+      const items = rest.split(',').map(larotCleanTaskText).filter(Boolean);
+      if(items.length){
+        const wk = dateKey(addDays(startOfWeek(new Date()), 7));
+        items.forEach(function(text){ larotAddChecklistItemFor(wk, text); });
+        if(items.length === 1) return { ok:true, message: 'Planejamento da semana que vem: ' + items[0] };
+        return { ok:true, message: items.length + ' itens no planejamento da semana que vem — ' + items.join(' · ') };
+      }
+    }
 
     const segments = larotSplitDayTasks(clean);
     if(segments.length === 0) return { ok:false, message:'Não consegui entender a tarefa.' };
@@ -1259,6 +1377,34 @@ try {
     }
   }
 
+  /* Só fala em voz alta as respostas marcadas com "speak" (as consultas de
+     planejamento semanal) — o resto fica só no texto, pra não atrapalhar
+     quem quer emendar vários comandos rápido. */
+  var preferredVoice = null;
+  var MALE_VOICE_HINT_RE = /male|masculin|homem|\b(daniel|ricardo|thiago|felipe|rafael|gustavo|f[aá]bio|rodrigo|bruno|marcos|paulo|jos[eé]|jo[aã]o|carlos|ant[oô]nio|pedro|fernando|eduardo|hugo|diego|leonardo|luiz|luís|miguel|davi|gabriel|lucas|matheus|andr[eé])\b/i;
+  function pickVoice(){
+    if(!("speechSynthesis" in window)) return;
+    var voices = window.speechSynthesis.getVoices();
+    var ptVoices = voices.filter(function(v){ return /^pt/i.test(v.lang); });
+    var male = ptVoices.find(function(v){ return MALE_VOICE_HINT_RE.test(v.name); });
+    preferredVoice = male || ptVoices[0] || null;
+  }
+  if("speechSynthesis" in window){
+    pickVoice();
+    window.speechSynthesis.onvoiceschanged = pickVoice;
+  }
+  function speak(text){
+    if(!("speechSynthesis" in window)) return;
+    try{
+      var utter = new SpeechSynthesisUtterance(text);
+      utter.lang = "pt-BR";
+      if(preferredVoice) utter.voice = preferredVoice;
+      utter.pitch = 0.6;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utter);
+    }catch(e){}
+  }
+
   function setListening(v){
     listening = v;
     micBtn.classList.toggle("listening", v);
@@ -1272,10 +1418,14 @@ try {
       showToast("Larot não está disponível neste app ainda.");
       return;
     }
-    var result = bridge.handleVoiceCommand(transcript);
-    larotLog("resultado: " + JSON.stringify(result));
-    var msg = (result && result.message) || (result && result.ok ? "Feito." : "Não consegui fazer isso.");
-    showToast(msg);
+    // handleVoiceCommand pode devolver direto ou uma Promise (as consultas
+    // de planejamento semanal buscam no Firestore antes de responder).
+    Promise.resolve(bridge.handleVoiceCommand(transcript)).then(function(result){
+      larotLog("resultado: " + JSON.stringify(result));
+      var msg = (result && result.message) || (result && result.ok ? "Feito." : "Não consegui fazer isso.");
+      showToast(msg);
+      if(result && result.speak) speak(msg);
+    });
   }
 
   /* Enquanto você fala, continuamos ouvindo até SILENCE_MS de silêncio de
