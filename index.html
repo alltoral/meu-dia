@@ -341,7 +341,7 @@
 
   /* CHECKLIST SEMANAL — itens sem dia fixo, pra depois arrastar pros dias */
   .week-checklist{
-    background:var(--white);
+    background:var(--pink);
     border-radius:14px;
     box-shadow:var(--paper-shadow);
     margin-bottom:14px;
@@ -349,7 +349,7 @@
   }
   .checklist-header{
     padding:14px 16px 8px;
-    border-bottom:2px solid rgba(20,17,22,0.08);
+    border-bottom:2px solid rgba(255,255,255,0.25);
     display:flex;
     align-items:baseline;
     gap:10px;
@@ -358,12 +358,12 @@
   .checklist-title{
     font-family:'DM Serif Display',serif;
     font-size:19px;
-    color:var(--black);
+    color:var(--white);
   }
   .checklist-hint{
     font-size:11px;
     font-style:italic;
-    color:#8A8680;
+    color:rgba(255,255,255,0.75);
   }
   .checklist-list{
     display:flex;
@@ -375,10 +375,24 @@
   }
   .checklist-empty{
     font-size:12.5px;
-    color:#B7B2AC;
+    color:rgba(255,255,255,0.7);
     font-style:italic;
     padding:6px 4px 10px;
   }
+  .week-checklist .task-item:hover{ background:rgba(255,255,255,0.1); }
+  .week-checklist .task-check{ border-color:var(--white); background:transparent; }
+  .week-checklist .task-item.done .task-check{ background:var(--white); border-color:var(--white); }
+  .week-checklist .task-item.done .task-check::after{ color:var(--pink); }
+  .week-checklist .task-text{ color:var(--white); }
+  .week-checklist .task-item.done .task-text{ opacity:0.6; }
+  .week-checklist .task-drag-handle{ color:rgba(255,255,255,0.55); }
+  .week-checklist .task-drag-handle:active{ color:var(--white); }
+  .week-checklist .task-close{ color:rgba(255,255,255,0.55); }
+  .week-checklist .add-task-row{ border-top:1px dashed rgba(255,255,255,0.3); }
+  .week-checklist .add-task-input{ color:var(--white); }
+  .week-checklist .add-task-input::placeholder{ color:rgba(255,255,255,0.6); }
+  .week-checklist .add-task-confirm{ color:var(--white); opacity:0.7; }
+  .week-checklist .add-task-confirm:hover{ opacity:1; }
 
   /* Bonequinho arrastado durante o drag entre dias */
   .larot-drag-ghost{
