@@ -346,6 +346,15 @@
     box-shadow:var(--paper-shadow);
     margin-bottom:14px;
     overflow:hidden;
+    border:3px solid transparent;
+  }
+  .week-checklist.planning{
+    border-color:var(--yellow);
+    animation:larotPlanningPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes larotPlanningPulse{
+    0%,100%{ box-shadow:var(--paper-shadow), 0 0 0 0 rgba(242,226,5,0.45); }
+    50%{ box-shadow:var(--paper-shadow), 0 0 0 6px rgba(242,226,5,0); }
   }
   .checklist-header{
     padding:14px 16px 8px;
@@ -500,7 +509,7 @@
     <div class="week-checklist" id="weekChecklist">
       <div class="checklist-header">
         <span class="checklist-title">Essa semana</span>
-        <span class="checklist-hint">arraste um item pra um dia da semana</span>
+        <span class="checklist-hint" id="checklistHint">arraste um item pra um dia da semana</span>
       </div>
       <div class="checklist-list" id="checklistList"></div>
       <div class="add-task-row">
@@ -1284,11 +1293,56 @@ try {
   const WEEK_QUERY_THIS_RE = /^\s*essa semana\s*[?.!]*\s*$|\b(o que (eu )?tenho|resumo|planejamento|lista)\b.*\bessa semana\b/;
   const WEEK_PLAN_TRIGGER_RE = /\b(semana que vem|proxima semana|semana seguinte)\b/;
 
+  /* ---------- Modo planejamento ----------
+     Em vez de tentar adivinhar intenção numa frase só (o que dava errado:
+     "essa semana eu vou na Verônica" virava tarefa de hoje), o Larot entra
+     num MODO: fala "planejar a semana" uma vez, e daí em diante toda frase
+     que você falar (uma de cada vez, tocando o personagem de novo a cada
+     uma) vira um item novo no checklist da semana seguinte — sem precisar
+     repetir "semana que vem" nem nada parecido. Fala "terminar
+     planejamento" (ou só "pronto"/"chega") quando acabar. */
+  let planningMode = false;
+  let planningWeekStart = null;
+  const PLAN_MODE_START_RE = /\b(vamos )?(planejar|organizar)\s+(a\s+)?semana\b/;
+  const PLAN_MODE_STOP_RE = /\b(terminar|finalizar|fechar|encerrar|parar)\b.*\bplanejamento\b|\bsair\s+d[oa]\s+planejamento\b|^\s*(pronto|chega|terminei|terminamos)\s*[.!]*\s*$/;
+
+  function larotSetPlanningUI(active){
+    const el = document.getElementById('weekChecklist');
+    const hint = document.getElementById('checklistHint');
+    if(el) el.classList.toggle('planning', active);
+    if(hint) hint.textContent = active
+      ? 'modo planejamento: fala uma tarefa por vez — diga "terminar planejamento" quando acabar'
+      : 'arraste um item pra um dia da semana';
+  }
+
   function larotHandleVoiceCommand(transcript){
     if(!transcript || !transcript.trim()) return { ok:false, message:'Não ouvi nada.' };
     const clean = transcript.replace(/^[\s,;:.!?\-–—]+/, '').replace(/[\s,;:.!?\-–—]+$/, '');
     if(!clean) return { ok:false, message:'Não ouvi nada.' };
     const lower = larotNormalize(clean);
+
+    if(planningMode){
+      if(PLAN_MODE_STOP_RE.test(lower)){
+        const label = larotWeekRangeLabel(planningWeekStart);
+        planningMode = false;
+        planningWeekStart = null;
+        larotSetPlanningUI(false);
+        return { ok:true, message: 'Planejamento da semana de ' + label + ' fechado.', speak:true };
+      }
+      const text = larotCleanTaskText(clean);
+      if(!text) return { ok:false, message:'Não entendi. Fala a tarefa, ou diga "terminar planejamento" pra sair.' };
+      larotAddChecklistItemFor(dateKey(planningWeekStart), text);
+      return { ok:true, message: '+ ' + text };
+    }
+
+    if(PLAN_MODE_START_RE.test(lower)){
+      planningMode = true;
+      planningWeekStart = addDays(startOfWeek(new Date()), 7);
+      currentWeekStart = planningWeekStart;
+      switchWeek();
+      larotSetPlanningUI(true);
+      return { ok:true, message: 'Planejamento aberto — semana de ' + larotWeekRangeLabel(planningWeekStart) + '. Fala as tarefas uma por uma; diga "terminar planejamento" quando acabar.', speak:true };
+    }
 
     if(WEEK_QUERY_NEXT_RE.test(lower)){
       const weekStart = addDays(startOfWeek(new Date()), 7);
